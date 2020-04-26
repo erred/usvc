@@ -4,7 +4,7 @@
 //
 // Hello world:
 //
-//      c := usvc.NewConfig(usvc.WithEnv(), usvc.WithFlags(flag.CommandLine))
+//      c := usvc.NewConfig(flag.CommandLine)
 //      flag.Parse()
 //      usvc.Run(usvc.SignalContext(), usvc.NewServerSimple(c))
 //
@@ -13,7 +13,7 @@
 //     var foo string
 //     fs := flag.NewFlagSet(args[0], flag.ExitOnError)
 //     fs.StringVar(&foo, "foo", "bar", "foobar")
-//     svc := usvc.NewServerSimple(usvc.NewConfig(usvc.WithEnv(), usvc.WithFlags(fs)))
+//     svc := usvc.NewServerSimple(usvc.NewConfig(fs))
 //     fs.Parse()
 //
 //     svc.Mux.HandleFunc("/foo", func(w http.ResponseWriter, r *http.Request){
