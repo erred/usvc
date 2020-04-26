@@ -43,9 +43,16 @@ type Config struct {
 	Port string
 }
 
-// NewConfig returns a config with defaults
+func NewConfig(fs *flag.FlagSet) *Config {
+	c := defaultConfig
+	WithEnv()(&c)
+	WithFlags(fs)(&c)
+	return &c
+}
+
+// NewConfigOptions returns a config with defaults
 // overriden by options
-func NewConfig(options ...ConfigOption) *Config {
+func NewConfigOptions(options ...ConfigOption) *Config {
 	c := defaultConfig
 	for _, o := range options {
 		o(&c)

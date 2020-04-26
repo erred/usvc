@@ -26,7 +26,7 @@ type Server struct {
 func NewServer(args []string) *Server {
         fs := flag.NewFlagSet(args[0], flag.ExitOnError)
         s := &Server{
-                svc: usvc.NewServiceSimple(usvc.NewConfig(usvc.WithEnv(), usvc.WithFlags(fs))),
+                svc: usvc.NewServiceSimple(usvc.NewConfig(fs)),
         }
         fs.StringVar(&s.msg, "msg", "a message", "a message to the world")
         fs.Parse(args[1:])
