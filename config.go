@@ -8,7 +8,7 @@ import (
 
 var (
 	defaultConfig = Config{
-		LogLevel:  "",
+		LogLevel:  "trace",
 		LogFormat: "json",
 
 		ReadTimeout:       5 * time.Second,
@@ -24,7 +24,7 @@ var (
 
 type Config struct {
 	// valid values are:
-	// "", trace, debug, info, warn, error, fatal, panic
+	// trace, debug, info, warn, error, fatal, panic
 	LogLevel string
 	// valid values are:
 	// json, console
