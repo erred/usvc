@@ -4,7 +4,7 @@ type ServerSimple struct {
 	*Server
 }
 
-func NewServiceSimple(c *Config) *ServerSimple {
+func NewServerSimple(c *Config) *ServerSimple {
 	s := &ServerSimple{
 		NewServer(c),
 	}
