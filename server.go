@@ -52,9 +52,11 @@ func NewServer(cfg *Config) *Server {
 }
 
 func (s *Server) Run() error {
+	s.Log.Info().Str("addr", s.Srv.Addr).Msg("starting server")
 	return s.Srv.ListenAndServe()
 }
 func (s *Server) Shutdown() error {
+	s.Log.Info().Msg("stopping server")
 	return s.Srv.Shutdown(SignalContext())
 }
 
