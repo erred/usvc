@@ -7,6 +7,39 @@ A repo for usvc
 [![pkg.go.dev](http://img.shields.io/badge/godoc-reference-blue.svg?style=flat-square)](https://pkg.go.dev/go.seankhliao.com/usvc)
 
 ```go
-import "go.seankhliao.com/usvc"
-```
+package main
 
+import (
+        "flag"
+        "net/http"
+        "os"
+
+        "go.seankhliao.com/usvc"
+)
+
+type Server struct {
+        svc *usvc.ServerSimple
+
+        msg string
+}
+
+func NewServer(args []string) *Server {
+        fs := flag.NewFlagSet(args[0], flag.ExitOnError)
+        s := &Server{
+                svc: usvc.NewServiceSimple(usvc.NewConfig(usvc.WithEnv(), usvc.WithFlags(fs))),
+        }
+        fs.StringVar(&s.msg, "msg", "a message", "a message to the world")
+        fs.Parse(args[1:])
+        s.svc.Mux.HandleFunc("/", s.messenger)
+        return s
+}
+
+func (s *Server) messenger(w http.ResponseWriter, r *http.Request) {
+        w.Write([]byte(s.msg))
+        s.svc.Log.Info().Msg("spread the message")
+}
+
+func main() {
+        usvc.Run(usvc.SignalContext(), NewServer(os.Args).svc)
+}
+```
