@@ -1,6 +1,9 @@
 package usvc
 
-import "crypto/tls"
+import (
+	"crypto/tls"
+	"net/http"
+)
 
 type ServerSecure struct {
 	*Server
@@ -16,5 +19,6 @@ func NewServerSecure(c *Config, certFile, keyFile string) (*ServerSecure, error)
 	}
 	WithLiveliness("/health")(s.Server)
 	WithTLS(cert)(s.Server)
+	WithCORS([]string{http.MethodOptions, http.MethodGet}, []string{"*"})(s.Server)
 	return s, nil
 }

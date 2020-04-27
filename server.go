@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -84,5 +85,52 @@ func WithTLS(cert tls.Certificate) ServerOption {
 			PreferServerCipherSuites: true,
 			Certificates:             []tls.Certificate{cert},
 		}
+	}
+}
+
+func WithCORS(allowedMethods []string, allowedSuffix []string) ServerOption {
+	allowedMeths := strings.Join(allowedMethods, ", ")
+	meth := map[string]struct{}{}
+	for _, m := range allowedMethods {
+		meth[m] = struct{}{}
+	}
+
+	var allowAllOrigin bool
+	if (len(allowedSuffix) == 1) && (allowedSuffix[0] == "*") {
+		allowAllOrigin = true
+	}
+	as := func(o string) string {
+		if allowAllOrigin {
+			return "*"
+		}
+		for _, s := range allowedSuffix {
+			if strings.HasSuffix(o, s) {
+				return o
+			}
+		}
+		return ""
+	}
+
+	return func(s *Server) {
+		h := s.Srv.Handler
+		s.Srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodOptions {
+				o := as(r.Header.Get("origin"))
+				if o == "" {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				w.Header().Set("Access-Control-Allow-Origin", o)
+				w.Header().Set("Access-Control-Allow-Methods", allowedMeths)
+				w.Header().Set("Access-Control-Max-Age", "86400")
+				if o == "*" {
+					w.Header().Add("Vary", "Origin")
+				}
+			} else if _, ok := meth[r.Method]; !ok {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
 	}
 }
