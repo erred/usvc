@@ -22,3 +22,7 @@ func NewServerSecure(c *Config, certFile, keyFile string) (*ServerSecure, error)
 	WithCORS([]string{http.MethodOptions, http.MethodGet}, []string{"*"})(s.Server)
 	return s, nil
 }
+
+func (s *ServerSecure) Run() error {
+	return s.Srv.ListenAndServeTLS("", "")
+}
