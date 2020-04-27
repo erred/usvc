@@ -1,6 +1,7 @@
 package usvc
 
 import (
+	"crypto/tls"
 	"log"
 	"net"
 	"net/http"
@@ -67,5 +68,21 @@ func WithLiveliness(p string) ServerOption {
 		s.Mux.HandleFunc(p, func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
+	}
+}
+
+func WithTLSConfig(c *tls.Config) ServerOption {
+	return func(s *Server) {
+		s.Srv.TLSConfig = c
+	}
+}
+
+func WithTLS(cert tls.Certificate) ServerOption {
+	return func(s *Server) {
+		s.Srv.TLSConfig = &tls.Config{
+			MinVersion:               tls.VersionTLS13,
+			PreferServerCipherSuites: true,
+			Certificates:             []tls.Certificate{cert},
+		}
 	}
 }
