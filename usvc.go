@@ -19,18 +19,18 @@ import (
 	"go.opentelemetry.io/otel/exporters/metric/prometheus"
 )
 
-// HTTPServerConf holds configs for creating a http.Server
-type HTTPServerConf struct {
+// Conf holds configs for creating a http.Server
+type Conf struct {
 	Addr        string
 	TLSCertFile string
 	TLSKeyFile  string
 }
 
 // RegisterFlags adds flags to flagset
-func (sc *HTTPServerConf) RegisterFlags(fs *flag.FlagSet) {
-	fs.StringVar(&sc.Addr, "addr", ":8080", "listen addr")
-	fs.StringVar(&sc.TLSCertFile, "tls-cert", "", "tls cert file")
-	fs.StringVar(&sc.TLSKeyFile, "tls-key", "", "tls key file")
+func (c *Conf) RegisterFlags(fs *flag.FlagSet) {
+	fs.StringVar(&c.Addr, "addr", ":8080", "listen addr")
+	fs.StringVar(&c.TLSCertFile, "tls-cert", "", "tls cert file")
+	fs.StringVar(&c.TLSKeyFile, "tls-key", "", "tls key file")
 }
 
 // Server returns a http.Server if modification is needed,
@@ -41,7 +41,7 @@ func (sc *HTTPServerConf) RegisterFlags(fs *flag.FlagSet) {
 //
 // Inserts /debug/pprof/, /health, and /metrics endpoints
 // and wraps all handlers with CORS and request logging
-func (sc HTTPServerConf) Server(h http.Handler, log zerolog.Logger) (*http.Server, func(context.Context) error, error) {
+func (c Conf) Server(h http.Handler, log zerolog.Logger) (*http.Server, func(context.Context) error, error) {
 	latency := metric.Must(global.Meter(os.Args[0])).NewInt64ValueRecorder(
 		"request_latency_ms",
 		metric.WithDescription("http request serve latency"),
@@ -65,7 +65,7 @@ func (sc HTTPServerConf) Server(h http.Handler, log zerolog.Logger) (*http.Serve
 	h = corsAllowAll(h)
 
 	srv := &http.Server{
-		Addr:              sc.Addr,
+		Addr:              c.Addr,
 		Handler:           h,
 		ReadTimeout:       5 * time.Second,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -96,8 +96,8 @@ func (sc HTTPServerConf) Server(h http.Handler, log zerolog.Logger) (*http.Serve
 		}()
 
 		var err error
-		if sc.TLSKeyFile != "" {
-			err = srv.ListenAndServeTLS(sc.TLSCertFile, sc.TLSKeyFile)
+		if c.TLSKeyFile != "" {
+			err = srv.ListenAndServeTLS(c.TLSCertFile, c.TLSKeyFile)
 		} else {
 			err = srv.ListenAndServe()
 		}
