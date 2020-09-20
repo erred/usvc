@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
+	"io"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -19,18 +20,71 @@ import (
 	"go.opentelemetry.io/otel/exporters/metric/prometheus"
 )
 
+type FlagRegisterer interface {
+	RegisterFlags(*flag.FlagSet)
+}
+
 // Conf holds configs for creating a http.Server
 type Conf struct {
 	Addr        string
 	TLSCertFile string
 	TLSKeyFile  string
+	LogLevel    string
+	LogFormat   string
+}
+
+// DefaultConf uses a new flagset and os.Args,
+// adding all flags
+func DefaultConf(frs ...FlagRegisterer) Conf {
+	var c Conf
+
+	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	c.RegisterFlags(fs)
+	for _, fr := range frs {
+		fr.RegisterFlags(fs)
+	}
+
+	fs.Parse(os.Args[1:])
+	return c
 }
 
 // RegisterFlags adds flags to flagset
 func (c *Conf) RegisterFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.Addr, "addr", ":8080", "listen addr")
-	fs.StringVar(&c.TLSCertFile, "tls-cert", "", "tls cert file")
-	fs.StringVar(&c.TLSKeyFile, "tls-key", "", "tls key file")
+	fs.StringVar(&c.TLSCertFile, "tls.crt", "", "tls cert file")
+	fs.StringVar(&c.TLSKeyFile, "tls.key", "", "tls key file")
+	fs.StringVar(&c.LogLevel, "log.level", "", "logging level: debug, info, warn, error")
+	fs.StringVar(&c.LogFormat, "log.format", "", "format: logfmt, json")
+}
+
+// Logger returns a configured logger
+func (c Conf) Logger() zerolog.Logger {
+	lvl, _ := zerolog.ParseLevel(c.LogLevel)
+	var out io.Writer
+	switch c.LogFormat {
+	case "logfmt":
+		out = zerolog.ConsoleWriter{
+			Out: os.Stdout,
+		}
+	case "json":
+		fallthrough
+	default:
+		out = os.Stdout
+	}
+	return zerolog.New(out).Level(lvl).With().Timestamp().Logger()
+}
+
+// RunServer is a convenience function to run the server without modification
+func (c Conf) RunServer(ctx context.Context, h http.Handler, log zerolog.Logger) error {
+	_, run, err := c.Server(h, log)
+	if err != nil {
+		return err
+	}
+	err = run(ctx)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // Server returns a http.Server if modification is needed,
