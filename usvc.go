@@ -67,16 +67,14 @@ func (c *Conf) RegisterFlags(fs *flag.FlagSet) {
 // Logger returns a configured logger
 func (c Conf) Logger() zerolog.Logger {
 	lvl, _ := zerolog.ParseLevel(c.LogLevel)
-	var out io.Writer
+	var out io.Writer = os.Stdout
 	switch c.LogFormat {
 	case "logfmt":
 		out = zerolog.ConsoleWriter{
-			Out: os.Stdout,
+			Out: out,
 		}
 	case "json":
-		fallthrough
 	default:
-		out = os.Stdout
 	}
 	return zerolog.New(out).Level(lvl).With().Timestamp().Logger()
 }
