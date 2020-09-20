@@ -110,6 +110,7 @@ func (c Conf) Server(m *http.ServeMux) (*http.Server, *grpc.Server, Runner, erro
 	h = corsAllowAll(h)
 
 	// grpc
+	var grpctls bool
 	var opts []grpc.ServerOption
 	if c.TLSKeyFile != "" {
 		creds, err := credentials.NewServerTLSFromFile(c.TLSCertFile, c.TLSKeyFile)
@@ -117,6 +118,7 @@ func (c Conf) Server(m *http.ServeMux) (*http.Server, *grpc.Server, Runner, erro
 			return nil, nil, nil, err
 		}
 		opts = append(opts, grpc.Creds(creds))
+		grpctls = true
 	}
 	opts = append(opts, grpcMid(c.Logger(), latency))
 	grpcServer := grpc.NewServer(opts...)
@@ -143,6 +145,9 @@ func (c Conf) Server(m *http.ServeMux) (*http.Server, *grpc.Server, Runner, erro
 		if err != nil {
 			return err
 		}
+
+		lg := c.Logger()
+		lg.Info().Str("grpc-addr", c.GRPCAddr).Bool("tls", grpctls).Msg("started grpc server")
 		return grpcServer.Serve(lis)
 	}
 	httpServer, httpRun, err := c.sharedServer(h, nil)
@@ -210,10 +215,13 @@ func (c Conf) sharedServer(h http.Handler, grpcServer *grpc.Server) (*http.Serve
 			se <- err
 		}()
 
+		lg := c.Logger()
 		var err error
 		if c.TLSKeyFile != "" {
+			lg.Info().Str("http-addr", c.HTTPAddr).Bool("tls", true).Msg("started http server")
 			err = srv.ListenAndServeTLS(c.TLSCertFile, c.TLSKeyFile)
 		} else {
+			lg.Info().Str("http-addr", c.HTTPAddr).Bool("tls", false).Msg("started http server")
 			err = srv.ListenAndServe()
 		}
 		if errors.Is(err, http.ErrServerClosed) {
