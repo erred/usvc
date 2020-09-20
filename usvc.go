@@ -60,8 +60,8 @@ func (c *Conf) RegisterFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.GRPCAddr, "grpc.addr", ":8080", "listen addr for grpc")
 	fs.StringVar(&c.TLSCertFile, "tls.crt", "", "tls cert file")
 	fs.StringVar(&c.TLSKeyFile, "tls.key", "", "tls key file")
-	fs.StringVar(&c.LogLevel, "log.level", "", "logging level: debug, info, warn, error")
-	fs.StringVar(&c.LogFormat, "log.format", "", "format: logfmt, json")
+	fs.StringVar(&c.LogLevel, "log.level", "trace", "logging level: debug, info, warn, error")
+	fs.StringVar(&c.LogFormat, "log.format", "json", "format: logfmt, json")
 }
 
 // Logger returns a configured logger
