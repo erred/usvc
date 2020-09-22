@@ -81,6 +81,11 @@ func Run(ctx context.Context, name string, server Service, grpcsvc bool) {
 	}
 
 	// run
+	svc := "http"
+	if grpcsvc {
+		svc = "grpc"
+	}
+	c.Log.Info().Str(svc, *serviceAddr).Bool("tls", tlsConf != nil).Str("metric", *metricAddr).Msg("starting server")
 	errc, done := startServers(ctx, msrv, hsrv, c.GRPC, tlsConf, grpcsvc)
 	<-done
 	shutdownServers(errc, server, msrv, hsrv, c.GRPC, grpcsvc)
