@@ -22,25 +22,15 @@ import (
 // Service only mandates a name,
 // everythign else is optional
 type Service interface {
-	Name() string
-}
-
-// Flagger is for registering flags
-type Flagger interface {
+	// Flagger is for registering flags
 	Flag(fs *flag.FlagSet)
-}
-
-// Registrar is the time to
-// get the logger, tracer, metric;
-// add routes, services;
-// start background services
-type Registrar interface {
-	Register(*Components)
-}
-
-// Shutdowner an optional interface to implement
-// to be called in the graceful shutdown sequence
-type Shutdowner interface {
+	// Register is the time to
+	// get the logger, tracer, metric;
+	// add routes, services;
+	// start background services
+	Register(c *Components) error
+	// Shutdown an optional interface to implement
+	// to be called in the graceful shutdown sequence
 	Shutdown(ctx context.Context) error
 }
 
@@ -52,9 +42,7 @@ func Run(ctx context.Context, name string, server Service, grpcsvc bool) {
 	tlsKey := fs.String("tls.key", "", "tls key file")
 	logLevel := fs.String("log.lvl", "trace", "log level: trace, debug, info, error")
 	logFormat := fs.String("log.fmt", "json", "log format: logfmt, json")
-	if i, ok := server.(Flagger); ok {
-		i.Flag(fs)
-	}
+	server.Flag(fs)
 	fs.Parse(os.Args[1:])
 
 	c, err := NewComponents(name, *logLevel, *logFormat)
@@ -86,8 +74,10 @@ func Run(ctx context.Context, name string, server Service, grpcsvc bool) {
 	hsrv := httpServer(*serviceAddr, hhandler, tlsConf)
 
 	// register other services
-	if i, ok := server.(Registrar); ok {
-		i.Register(c)
+	err = server.Register(c)
+	if err != nil {
+		c.Log.Error().Err(err).Msg("register service")
+		return
 	}
 
 	// run
@@ -190,13 +180,11 @@ func startServers(ctx context.Context, msrv, hsrv *http.Server, gsrv *grpc.Serve
 func shutdownServers(errc chan error, server Service, msrv, hsrv *http.Server, gsrv *grpc.Server, grpcsvc bool) {
 	sdctx := context.Background()
 	var wg sync.WaitGroup
-	if i, ok := server.(Shutdowner); ok {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errc <- i.Shutdown(sdctx)
-		}()
-	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		errc <- server.Shutdown(sdctx)
+	}()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
