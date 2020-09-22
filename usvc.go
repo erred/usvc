@@ -3,230 +3,246 @@ package usvc
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"flag"
-	"io"
 	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
 	"os/signal"
-	"strings"
+	"sync"
 	"syscall"
 	"time"
 
-	"github.com/rs/zerolog"
-	"go.opentelemetry.io/otel/api/global"
-	"go.opentelemetry.io/otel/api/metric"
-	"go.opentelemetry.io/otel/api/unit"
-	"go.opentelemetry.io/otel/exporters/metric/prometheus"
-	"golang.org/x/sync/errgroup"
+	otelgrpc "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc"
+	otelhttp "go.opentelemetry.io/contrib/instrumentation/net/http"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
 
-type FlagRegisterer interface {
-	RegisterFlags(*flag.FlagSet)
+// Service only mandates a name,
+// everythign else is optional
+type Service interface {
+	Name() string
 }
 
-// Conf holds configs for creating a http.Server
-type Conf struct {
-	HTTPAddr    string
-	GRPCAddr    string
-	TLSCertFile string
-	TLSKeyFile  string
-	LogLevel    string
-	LogFormat   string
+// Flagger is for registering flags
+type Flagger interface {
+	Flag(fs *flag.FlagSet)
 }
 
-// DefaultConf uses a new flagset and os.Args,
-// adding all flags
-func DefaultConf(frs ...FlagRegisterer) Conf {
-	var c Conf
+// Registrar is the time to
+// get the logger, tracer, metric;
+// add routes, services;
+// start background services
+type Registrar interface {
+	Register(*Components)
+}
 
-	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	c.RegisterFlags(fs)
-	for _, fr := range frs {
-		fr.RegisterFlags(fs)
+// Shutdowner an optional interface to implement
+// to be called in the graceful shutdown sequence
+type Shutdowner interface {
+	Shutdown(ctx context.Context) error
+}
+
+func Run(ctx context.Context, name string, server Service, grpcsvc bool) {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	metricAddr := fs.String("addr.metric", ":8000", "metric address")
+	serviceAddr := fs.String("addr", ":8080", "service address")
+	tlsCert := fs.String("tls.crt", "", "tls cert file")
+	tlsKey := fs.String("tls.key", "", "tls key file")
+	logLevel := fs.String("log.lvl", "trace", "log level: trace, debug, info, error")
+	logFormat := fs.String("log.fmt", "json", "log format: logfmt, json")
+	if i, ok := server.(Flagger); ok {
+		i.Flag(fs)
 	}
-
 	fs.Parse(os.Args[1:])
-	return c
-}
 
-// RegisterFlags adds flags to flagset
-func (c *Conf) RegisterFlags(fs *flag.FlagSet) {
-	fs.StringVar(&c.HTTPAddr, "http.addr", ":8080", "listen addr for http")
-	fs.StringVar(&c.GRPCAddr, "grpc.addr", ":8080", "listen addr for grpc")
-	fs.StringVar(&c.TLSCertFile, "tls.crt", "", "tls cert file")
-	fs.StringVar(&c.TLSKeyFile, "tls.key", "", "tls key file")
-	fs.StringVar(&c.LogLevel, "log.level", "trace", "logging level: debug, info, warn, error")
-	fs.StringVar(&c.LogFormat, "log.format", "json", "format: logfmt, json")
-}
-
-// Logger returns a configured logger
-func (c Conf) Logger() zerolog.Logger {
-	lvl, _ := zerolog.ParseLevel(c.LogLevel)
-	var out io.Writer = os.Stdout
-	switch c.LogFormat {
-	case "logfmt":
-		out = zerolog.ConsoleWriter{
-			Out: out,
-		}
-	case "json":
-	default:
-	}
-	return zerolog.New(out).Level(lvl).With().Timestamp().Logger()
-}
-
-type Runner func(context.Context) error
-
-func (c Conf) Server(m *http.ServeMux) (*http.Server, *grpc.Server, Runner, error) {
-	latency := metric.Must(global.Meter(os.Args[0])).NewInt64ValueRecorder(
-		"request_latency_ms",
-		metric.WithDescription("http request serve latency"),
-		metric.WithUnit(unit.Milliseconds),
-	)
-
-	if m == nil {
-		m = http.NewServeMux()
-	}
-
-	m.HandleFunc("/debug/pprof/", pprof.Index)
-	m.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	m.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	m.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	m.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	m.Handle("/health", healthOK)
-	promExporter, _ := prometheus.InstallNewPipeline(prometheus.Config{
-		DefaultHistogramBoundaries: []float64{1, 5, 10, 50, 100},
-	})
-	m.Handle("/metrics", promExporter)
-
-	// http
-	h := httpMid(m, c.Logger(), latency)
-	h = corsAllowAll(h)
-
-	// grpc
-	var grpctls bool
-	var opts []grpc.ServerOption
-	if c.TLSKeyFile != "" {
-		creds, err := credentials.NewServerTLSFromFile(c.TLSCertFile, c.TLSKeyFile)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		opts = append(opts, grpc.Creds(creds))
-		grpctls = true
-	}
-	opts = append(opts, grpcMid(c.Logger(), latency))
-	grpcServer := grpc.NewServer(opts...)
-
-	// share
-	if c.GRPCAddr == c.HTTPAddr {
-		httpServer, run, err := c.sharedServer(h, grpcServer)
-		return httpServer, grpcServer, run, err
-	}
-
-	// separate
-	grpcRun := func(ctx context.Context) error {
-		go func() {
-			c := make(chan os.Signal, 1)
-			signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-			select {
-			case <-c:
-			case <-ctx.Done():
-			}
-			grpcServer.GracefulStop()
-		}()
-
-		lis, err := net.Listen("tcp", c.GRPCAddr)
-		if err != nil {
-			return err
-		}
-
-		lg := c.Logger()
-		lg.Info().Str("grpc-addr", c.GRPCAddr).Bool("tls", grpctls).Msg("started grpc server")
-		return grpcServer.Serve(lis)
-	}
-	httpServer, httpRun, err := c.sharedServer(h, nil)
+	c, err := NewComponents(name, *logLevel, *logFormat)
 	if err != nil {
-		return nil, nil, nil, err
+		c.Log.Error().Err(err).Msg("setup components")
+		return
 	}
 
-	run := func(ctx context.Context) error {
-		group, ctx := errgroup.WithContext(ctx)
-		group.Go(func() error { return httpRun(ctx) })
-		group.Go(func() error { return grpcRun(ctx) })
-		return group.Wait()
+	tlsConf, gopts, err := tlsSetup(*tlsCert, *tlsKey)
+	if err != nil {
+		c.Log.Error().Err(err).Str("crt", *tlsCert).Str("key", *tlsKey).Msg("setup tls")
+		return
 	}
-	return httpServer, grpcServer, run, nil
 
+	// metrics endpoint
+	mmux := http.NewServeMux() // metrics http
+	mmux.Handle("/metrics", c.prom)
+	mmux.HandleFunc("/health", okhandler)
+	pprofHandlers(mmux)
+	msrv := httpServer(*metricAddr, mmux, nil)
+
+	// grpc server endpoint
+	gopts = append(gopts, grpc.ChainUnaryInterceptor(otelgrpc.UnaryServerInterceptor(c.Tracer), c.unaryLog))
+	c.GRPC = grpc.NewServer(gopts...)
+
+	// http server endpoint
+	c.HTTP = http.NewServeMux() // service http
+	hhandler := otelhttp.NewHandler(c.httpLog(corsAllowAll(c.HTTP)), name, otelhttp.WithMessageEvents(otelhttp.ReadEvents, otelhttp.WriteEvents))
+	hsrv := httpServer(*serviceAddr, hhandler, tlsConf)
+
+	// register other services
+	if i, ok := server.(Registrar); ok {
+		i.Register(c)
+	}
+
+	// run
+	errc, done := startServers(ctx, msrv, hsrv, c.GRPC, tlsConf, grpcsvc)
+	<-done
+	shutdownServers(errc, server, msrv, hsrv, c.GRPC, grpcsvc)
+
+	var errs []error
+	for err := range errc {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	c.Log.Error().Errs("shutdown", errs).Msg("exit")
 }
 
-func (c Conf) sharedServer(h http.Handler, grpcServer *grpc.Server) (*http.Server, Runner, error) {
-	var dispatch http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
-			grpcServer.ServeHTTP(w, r)
-		} else {
+func tlsSetup(tlsCert, tlsKey string) (*tls.Config, []grpc.ServerOption, error) {
+	if tlsCert != "" && tlsKey != "" {
+		cert, err := tls.LoadX509KeyPair(tlsCert, tlsKey)
+		if err != nil {
+			return nil, nil, err
+		}
+		tlsConf := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS13,
+		}
+		gopts := []grpc.ServerOption{grpc.Creds(credentials.NewTLS(tlsConf))}
+		return tlsConf, gopts, nil
+	}
+	return nil, nil, nil
+}
+
+func okhandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+}
+
+func corsAllowAll(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodOptions:
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST")
+			w.Header().Set("Access-Control-Max-Age", "86400")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case http.MethodGet, http.MethodPost:
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST")
+			w.Header().Set("Access-Control-Max-Age", "86400")
 			h.ServeHTTP(w, r)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
 		}
 	})
-	if grpcServer == nil {
-		dispatch = h
-	}
+}
 
-	srv := &http.Server{
-		Addr:              c.HTTPAddr,
-		Handler:           dispatch,
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    1 << 20,
-		TLSConfig: &tls.Config{
-			MinVersion: tls.VersionTLS13,
-		},
-	}
-
-	run := func(ctx context.Context) error {
-		se := make(chan error)
-
+func startServers(ctx context.Context, msrv, hsrv *http.Server, gsrv *grpc.Server, tlsConf *tls.Config, grpcsvc bool) (chan error, <-chan struct{}) {
+	errc := make(chan error)
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		sigc := make(chan os.Signal, 1)
+		signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
+		<-sigc
+		cancel()
+	}()
+	go func() {
+		err := msrv.ListenAndServe()
+		cancel()
+		errc <- err
+	}()
+	if grpcsvc {
 		go func() {
-			c := make(chan os.Signal, 1)
-			signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-			select {
-			case <-c:
-			case <-ctx.Done():
+			var err error
+			lis, err := net.Listen("tcp", "")
+			if err != nil {
+				cancel()
+				errc <- err
+				return
 			}
-
-			// call shutdown and wait for both
-			gc := make(chan struct{})
-			if grpcServer != nil {
-				go func() {
-					grpcServer.GracefulStop()
-					close(gc)
-				}()
-			}
-			err := srv.Shutdown(context.Background())
-			if grpcServer != nil {
-				<-gc
-			}
-
-			se <- err
+			err = gsrv.Serve(lis)
+			cancel()
+			errc <- err
 		}()
+	} else {
+		go func() {
+			var err error
+			if tlsConf == nil {
+				err = hsrv.ListenAndServe()
+			} else {
+				err = hsrv.ListenAndServeTLS("", "")
+			}
+			cancel()
+			errc <- err
+		}()
+	}
+	return errc, ctx.Done()
+}
 
-		lg := c.Logger()
-		var err error
-		if c.TLSKeyFile != "" {
-			lg.Info().Str("http-addr", c.HTTPAddr).Bool("tls", true).Msg("started http server")
-			err = srv.ListenAndServeTLS(c.TLSCertFile, c.TLSKeyFile)
-		} else {
-			lg.Info().Str("http-addr", c.HTTPAddr).Bool("tls", false).Msg("started http server")
-			err = srv.ListenAndServe()
-		}
-		if errors.Is(err, http.ErrServerClosed) {
-			return <-se
-		}
-		return err
+func shutdownServers(errc chan error, server Service, msrv, hsrv *http.Server, gsrv *grpc.Server, grpcsvc bool) {
+	sdctx := context.Background()
+	var wg sync.WaitGroup
+	if i, ok := server.(Shutdowner); ok {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errc <- i.Shutdown(sdctx)
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		errc <- msrv.Shutdown(sdctx)
+	}()
+	if grpcsvc {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			gsrv.GracefulStop()
+		}()
+	} else {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errc <- hsrv.Shutdown(sdctx)
+		}()
 	}
 
-	return srv, run, nil
+	go func() {
+		wg.Wait()
+		close(errc)
+	}()
+}
+
+func pprofHandlers(mmux *http.ServeMux) {
+	mmux.HandleFunc("/debug/pprof/", pprof.Index)
+	mmux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mmux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mmux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mmux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	mmux.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	mmux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+	mmux.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+	mmux.Handle("/debug/pprof/block", pprof.Handler("block"))
+}
+
+func httpServer(addr string, h http.Handler, tlsConf *tls.Config) *http.Server {
+	return &http.Server{
+		Addr:    addr,
+		Handler: h,
+		// ReadTimeout:       10 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		// WriteTimeout:      10 * time.Second,
+		// IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+		TLSConfig:      tlsConf,
+	}
 }
