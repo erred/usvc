@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/trace/jaeger"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/peer"
 )
 
 type Components struct {
@@ -124,7 +125,14 @@ func (c *Components) unaryLog(ctx context.Context, req interface{}, info *grpc.U
 		d := time.Since(t)
 		c.latency.Record(ctx, d.Milliseconds())
 
+		var pa string
+		p, ok := peer.FromContext(ctx)
+		if ok {
+			pa = p.Addr.String()
+		}
+
 		c.Log.Trace().
+			Str("src", pa).
 			Str("method", info.FullMethod).
 			Dur("dur", d).
 			Msg("served")
