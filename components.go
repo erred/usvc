@@ -127,12 +127,14 @@ func (c *Components) metric(name string) error {
 }
 
 func (c *Components) saver(saverURL string) error {
-	var err error
-	c.saverConn, err = grpc.Dial(saverURL, c.GRPCDialOptions...)
-	if err != nil {
-		return fmt.Errorf("saver dial %s: %w", saverURL, err)
+	if saverURL != "" && len(c.GRPCDialOptions) > 0 {
+		var err error
+		c.saverConn, err = grpc.Dial(saverURL, c.GRPCDialOptions...)
+		if err != nil {
+			return fmt.Errorf("saver dial %s: %w", saverURL, err)
+		}
+		c.saverClient = saver.NewSaverClient(c.saverConn)
 	}
-	c.saverClient = saver.NewSaverClient(c.saverConn)
 	return nil
 }
 
