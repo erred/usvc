@@ -117,7 +117,7 @@ func Exec(ctx context.Context, svc Service, args []string) int {
 	} else {
 		do = grpc.WithInsecure()
 	}
-	saverClient, saverShut, err := saverOpts.Saver(do)
+	saverClient, saverShut, err := saverOpts.Saver(grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor(usvc.tracer)), do)
 	if err != nil {
 		usvc.log.Error().Err(err).Msg("init saver")
 		return 1
