@@ -17,7 +17,7 @@ func (o MetricOpts) Metrics(mux *http.ServeMux) (live, ready HealthProbe) {
 
 	live.Healthy(true)
 	ready.Healthy(true)
-	mux.Handle("/liveliness", live)
+	mux.Handle("/liveness", live)
 	mux.Handle("/readiness", ready)
 
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
