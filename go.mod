@@ -7,6 +7,7 @@ require (
 	github.com/rs/zerolog v1.18.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.12.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.12.0
+	go.opentelemetry.io/contrib/propagators v0.12.0
 	go.opentelemetry.io/otel v0.12.0
 	go.opentelemetry.io/otel/exporters/trace/jaeger v0.12.0
 	go.opentelemetry.io/otel/sdk v0.12.0
