@@ -134,7 +134,7 @@ func Exec(ctx context.Context, svc Service, args []string) int {
 		sos = append(sos, grpc.Creds(credentials.NewTLS(tlsConf)))
 	}
 	sos = append(sos, grpc.ChainUnaryInterceptor(
-		otelgrpc.UnaryServerInterceptor(global.Tracer(name),
+		otelgrpc.UnaryServerInterceptor(global.Tracer(name)),
 		unaryLogMiddleware(
 			usvc.tracer,
 			usvc.log,
