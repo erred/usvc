@@ -24,6 +24,10 @@ func (o TracerOpts) Tracer() (shutdown func() error, err error) {
 			o.CollectorEndpoint,
 			jaeger.WithCollectorEndpointOptionFromEnv(),
 		),
+		jaeger.WithProcess(jaeger.Process{
+			ServiceName: name,
+		}),
+		jaeger.WithProcessFromEnv(),
 		// jaeger.WithSDK(&sdktrace.Config{DefaultSampler: sdktrace.NeverSample()}),
 		// jaeger.WithSDK(&sdktrace.Config{DefaultSampler: sdktrace.AlwaysSample()}),
 	)

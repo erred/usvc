@@ -151,7 +151,7 @@ func Exec(ctx context.Context, svc Service, args []string) int {
 			saverClient,
 			corsAllowAll(usvc.ServiceMux),
 		),
-		name,
+		"otelhttp",
 		otelhttp.WithMessageEvents(otelhttp.ReadEvents, otelhttp.WriteEvents),
 	)
 	// handler := usvc.ServiceMux
@@ -260,6 +260,9 @@ func (u *USVC) run(ctx context.Context, cancel func()) []error {
 
 func httpLogMiddleWare(tracer trace.Tracer, log zerolog.Logger, latency *prometheus.HistogramVec, saverClient saver.SaverClient, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, span := tracer.Start(r.Context(), "httpLogMiddleWare")
+		defer span.End()
+
 		t := time.Now()
 		defer func() {
 			d := time.Since(t)
@@ -276,6 +279,8 @@ func httpLogMiddleWare(tracer trace.Tracer, log zerolog.Logger, latency *prometh
 				Dur("dur", d).
 				Msg("served")
 
+			_, span := tracer.Start(ctx, "saverClient")
+			defer span.End()
 			_, err := saverClient.HTTP(context.Background(), &saver.HTTPRequest{
 				HttpRemote: &saver.HTTPRemote{
 					Timestamp: t.Format(time.RFC3339),
@@ -292,15 +297,15 @@ func httpLogMiddleWare(tracer trace.Tracer, log zerolog.Logger, latency *prometh
 			}
 		}()
 
-		ctx, span := tracer.Start(r.Context(), name)
-		defer span.End()
-
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 func unaryLogMiddleware(tracer trace.Tracer, log zerolog.Logger, latency *prometheus.HistogramVec) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+		ctx, span := tracer.Start(ctx, "unaryLogMiddleware")
+		defer span.End()
+
 		t := time.Now()
 		defer func() {
 			d := time.Since(t)
@@ -318,9 +323,6 @@ func unaryLogMiddleware(tracer trace.Tracer, log zerolog.Logger, latency *promet
 				Dur("dur", d).
 				Msg("served")
 		}()
-
-		ctx, span := tracer.Start(ctx, name)
-		defer span.End()
 
 		return handler(ctx, req)
 	}
