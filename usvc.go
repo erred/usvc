@@ -25,6 +25,10 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
+const (
+	name = "go.seankhliao.com/usvc"
+)
+
 type Service interface {
 	Flags(fs *flag.FlagSet)
 	Setup(ctx context.Context, usvc *USVC) error
@@ -99,7 +103,7 @@ func Exec(ctx context.Context, svc Service, args []string) int {
 		return 1
 	}
 	defer traceShut()
-	usvc.tracer = global.Tracer("usvc")
+	usvc.tracer = global.Tracer(name)
 
 	tlsConf, err := tlsOpts.Config()
 	if err != nil {
@@ -130,7 +134,7 @@ func Exec(ctx context.Context, svc Service, args []string) int {
 		sos = append(sos, grpc.Creds(credentials.NewTLS(tlsConf)))
 	}
 	sos = append(sos, grpc.ChainUnaryInterceptor(
-		otelgrpc.UnaryServerInterceptor(global.Tracer("usvc")),
+		otelgrpc.UnaryServerInterceptor(global.Tracer(name),
 		unaryLogMiddleware(
 			usvc.tracer,
 			usvc.log,
@@ -147,7 +151,7 @@ func Exec(ctx context.Context, svc Service, args []string) int {
 			saverClient,
 			corsAllowAll(usvc.ServiceMux),
 		),
-		"usvc",
+		name,
 		otelhttp.WithMessageEvents(otelhttp.ReadEvents, otelhttp.WriteEvents),
 	)
 	// handler := usvc.ServiceMux
@@ -288,7 +292,7 @@ func httpLogMiddleWare(tracer trace.Tracer, log zerolog.Logger, latency *prometh
 			}
 		}()
 
-		ctx, span := tracer.Start(r.Context(), "usvc")
+		ctx, span := tracer.Start(r.Context(), name)
 		defer span.End()
 
 		h.ServeHTTP(w, r.WithContext(ctx))
@@ -315,7 +319,7 @@ func unaryLogMiddleware(tracer trace.Tracer, log zerolog.Logger, latency *promet
 				Msg("served")
 		}()
 
-		ctx, span := tracer.Start(ctx, "usvc")
+		ctx, span := tracer.Start(ctx, name)
 		defer span.End()
 
 		return handler(ctx, req)
