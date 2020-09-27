@@ -229,7 +229,7 @@ func (u *USVC) run(ctx context.Context, cancel func()) []error {
 	}()
 
 	<-ctx.Done()
-	u.log.Info().Msg("starting shutdown sequence")
+	u.log.Info().Err(ctx.Err()).Msg("starting shutdown sequence")
 
 	sdctx := context.Background()
 	go func() {
