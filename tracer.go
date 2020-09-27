@@ -7,7 +7,6 @@ import (
 	"go.opentelemetry.io/otel/api/global"
 	"go.opentelemetry.io/otel/api/propagation"
 	"go.opentelemetry.io/otel/exporters/trace/jaeger"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 type TracerOpts struct {
@@ -25,7 +24,7 @@ func (o TracerOpts) Tracer() (shutdown func() error, err error) {
 			o.CollectorEndpoint,
 			jaeger.WithCollectorEndpointOptionFromEnv(),
 		),
-		jaeger.WithSDK(&sdktrace.Config{DefaultSampler: sdktrace.NeverSample()}),
+		// jaeger.WithSDK(&sdktrace.Config{DefaultSampler: sdktrace.NeverSample()}),
 		// jaeger.WithSDK(&sdktrace.Config{DefaultSampler: sdktrace.AlwaysSample()}),
 	)
 	shutdown = func() error {
