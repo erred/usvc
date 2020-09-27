@@ -263,7 +263,7 @@ func httpLogMiddleWare(tracer trace.Tracer, log zerolog.Logger, latency *prometh
 		t := time.Now()
 		defer func() {
 			d := time.Since(t)
-			latency.With(prometheus.Labels{"proto": r.Proto}).Observe(d.Seconds())
+			latency.WithLabelValues(r.Proto).Observe(d.Seconds())
 
 			remote := r.Header.Get("x-forwarded-for")
 			if remote == "" {
@@ -304,7 +304,7 @@ func unaryLogMiddleware(tracer trace.Tracer, log zerolog.Logger, latency *promet
 		t := time.Now()
 		defer func() {
 			d := time.Since(t)
-			latency.With(prometheus.Labels{"proto": "grpc"}).Observe(d.Seconds())
+			latency.WithLabelValues("grpc").Observe(d.Seconds())
 
 			var pa string
 			p, ok := peer.FromContext(ctx)
