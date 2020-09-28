@@ -279,9 +279,9 @@ func httpLogMiddleWare(tracer trace.Tracer, log zerolog.Logger, latency *prometh
 				Dur("dur", d).
 				Msg("served")
 
-			_, span := tracer.Start(ctx, "saverClient")
+			ctx, span := tracer.Start(ctx, "saverClient")
 			defer span.End()
-			_, err := saverClient.HTTP(context.Background(), &saver.HTTPRequest{
+			_, err := saverClient.HTTP(ctx, &saver.HTTPRequest{
 				HttpRemote: &saver.HTTPRemote{
 					Timestamp: t.Format(time.RFC3339),
 					Remote:    remote,
